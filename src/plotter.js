@@ -11,6 +11,8 @@ export class Plotter {
     this.running = false;
     this.paused = false;
     this.lineDuration = 3600;
+    this.lineSpeed = 0;
+    this.lineLengths = [];
     this.gapDuration = 420;
     this.sound = true;
     this.phase = 'line';
@@ -20,13 +22,56 @@ export class Plotter {
     this.raf = 0;
     this.audio = null;
     this.renderScale = Math.min(canvas.width, canvas.height) / 1000;
+    this._prepareLineTiming();
     this.clear();
   }
 
   setLines(lines) {
     this.lines = Array.isArray(lines) && lines.length ? lines : buildProceduralLines(this.canvas);
     this.renderScale = Math.min(this.canvas.width, this.canvas.height) / 1000;
+    this._prepareLineTiming();
     this.reset();
+  }
+
+  _prepareLineTiming() {
+    this.lineLengths = this.lines.map((line) => {
+      const cumulative = [0];
+      for (let i = 1; i < line.points.length; i++) {
+        const previous = line.points[i - 1];
+        const point = line.points[i];
+        cumulative.push(cumulative[i - 1] + Math.hypot(point[0] - previous[0], point[1] - previous[1]));
+      }
+      line.cumulative = cumulative;
+      line.length = cumulative.at(-1) || 1;
+      return line.length;
+    });
+    const averageLength = this.lineLengths.length
+      ? this.lineLengths.reduce((sum, length) => sum + length, 0) / this.lineLengths.length
+      : 1;
+    this.lineSpeed = averageLength / this.lineDuration;
+  }
+
+  _durationForLine(index) {
+    const length = this.lineLengths[index] || 1;
+    return Math.max(1800, Math.min(7200, Math.round(length / this.lineSpeed)));
+  }
+
+  _pointAtDistance(line, distance) {
+    if (distance <= 0) return line.points[0];
+    if (distance >= line.length) return line.points.at(-1);
+    let low = 0;
+    let high = line.cumulative.length - 1;
+    while (low + 1 < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (line.cumulative[middle] <= distance) low = middle;
+      else high = middle;
+    }
+    const span = line.cumulative[high] - line.cumulative[low] || 1;
+    const fraction = (distance - line.cumulative[low]) / span;
+    return [
+      line.points[low][0] + (line.points[high][0] - line.points[low][0]) * fraction,
+      line.points[low][1] + (line.points[high][1] - line.points[low][1]) * fraction
+    ];
   }
 
   clear() {
@@ -84,18 +129,22 @@ export class Plotter {
     this.pulseDepth.gain.setTargetAtTime(on && !travel ? 0.012 : 0, t, on ? 0.025 : 0.055);
   }
 
-  _drawSegment(line, fromIndex, toIndex) {
-    const points = line.points;
-    const start = Math.max(0, Math.min(points.length - 1, fromIndex));
-    const end = Math.max(start, Math.min(points.length - 1, toIndex));
-    if (end <= start) return;
+  _drawSegment(line, fromDistance, toDistance) {
+    if (toDistance <= fromDistance) return;
     const c = this.ctx;
+    const startPoint = this._pointAtDistance(line, fromDistance);
+    const endPoint = this._pointAtDistance(line, toDistance);
     c.save();
     c.lineCap = 'round';
     c.lineJoin = 'round';
     c.beginPath();
-    c.moveTo(points[start][0], points[start][1]);
-    for (let i = start + 1; i <= end; i++) c.lineTo(points[i][0], points[i][1]);
+    c.moveTo(startPoint[0], startPoint[1]);
+    for (let i = 1; i < line.cumulative.length - 1; i++) {
+      if (line.cumulative[i] > fromDistance && line.cumulative[i] < toDistance) {
+        c.lineTo(line.points[i][0], line.points[i][1]);
+      }
+    }
+    c.lineTo(endPoint[0], endPoint[1]);
     c.strokeStyle = line.color || '#000';
     c.lineWidth = 2.8 * this.renderScale;
     c.stroke();
@@ -135,7 +184,7 @@ export class Plotter {
     this.lineElapsed = 0;
     this.gapElapsed = 0;
     this.lastFrame = 0;
-    this._drawnPoint = 0;
+    this._drawnDistance = 0;
     this._motor(false);
     this.clear();
   }
@@ -148,18 +197,19 @@ export class Plotter {
 
     if (this.phase === 'line') {
       const line = this.lines[this.index];
-      this.lineElapsed = Math.min(this.lineDuration, this.lineElapsed + dt);
-      const fraction = this.lineElapsed / this.lineDuration;
-      const lastPoint = line.points.length - 1;
-      const target = Math.min(lastPoint, Math.floor(fraction * lastPoint));
-      this._drawSegment(line, this._drawnPoint, target);
-      this._drawnPoint = target;
+      const duration = this._durationForLine(this.index);
+      this.lineElapsed = Math.min(duration, this.lineElapsed + dt);
+      const fraction = this.lineElapsed / duration;
+      const targetDistance = fraction * line.length;
+      this._drawSegment(line, this._drawnDistance, targetDistance);
+      this._drawnDistance = targetDistance;
       this.onProgress(this.index + fraction, this.lines.length);
       if (fraction >= 1) {
         this.index++;
         this.phase = 'gap';
         this.gapElapsed = 0;
-        this._drawnPoint = 0;
+        this.lineElapsed = 0;
+        this._drawnDistance = 0;
         this.onProgress(this.index, this.lines.length);
         if (this.index >= this.lines.length) {
           this._motor(false);
