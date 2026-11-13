@@ -260,7 +260,6 @@ export function buildLinesFromSTL(triangles, canvas) {
   const surfaces = splitSurfaceTriangles(triangles, depthAxis);
   const hasThickness = surfaces.top.length >= triangles.length * 0.05 && surfaces.bottom.length >= triangles.length * 0.05;
   const sampleTop = buildSurfaceSampler(hasThickness ? surfaces.top : triangles, uAxis, vAxis, bounds);
-  const sampleBottom = hasThickness ? buildSurfaceSampler(surfaces.bottom, uAxis, vAxis, bounds) : null;
   const side = Math.min(canvas.width, canvas.height);
   const padding = side * 0.075;
   const plotSize = side - padding * 2;
@@ -282,7 +281,6 @@ export function buildLinesFromSTL(triangles, canvas) {
         ? bounds.min[uAxis] + j * uSpan / (count - 1)
         : bounds.min[vAxis] + j * vSpan / (count - 1);
       const topPoints = [];
-      const bottomPoints = [];
       for (let i = 0; i <= samples; i++) {
         const moving = vertical
           ? bounds.min[vAxis] + i * vSpan / samples
@@ -290,39 +288,54 @@ export function buildLinesFromSTL(triangles, canvas) {
         const u = vertical ? fixed : moving;
         const v = vertical ? moving : fixed;
         const topDepth = sampleTop(u, v);
-        const bottomDepth = sampleBottom ? sampleBottom(u, v) : null;
         topPoints.push(topDepth === null ? null : [
           mapU(u) - (vertical ? ((topDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels : 0),
           mapV(v) - (vertical ? 0 : ((topDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels)
         ]);
-        bottomPoints.push(bottomDepth === null ? null : [
-          mapU(u) - (vertical ? ((bottomDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels : 0),
-          mapV(v) - (vertical ? 0 : ((bottomDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels)
-        ]);
       }
 
+      const runs = [];
       let start = null;
-      const flush = (end) => {
-        if (start === null || end - start < 1) return;
-        if (!sampleBottom) {
-          addPath(topPoints.slice(start, end + 1).filter(Boolean), color, layer);
-          return;
-        }
-        const path = topPoints.slice(start, end + 1);
-        path.push(bottomPoints[end]);
-        for (let i = end - 1; i >= start; i--) path.push(bottomPoints[i]);
-        path.push(topPoints[start]);
-        addPath(path, color, layer);
-      };
-
       for (let i = 0; i <= samples; i++) {
-        const present = topPoints[i] && (!sampleBottom || bottomPoints[i]);
+        const present = Boolean(topPoints[i]);
         if (present && start === null) start = i;
         if ((!present || i === samples) && start !== null) {
-          flush(present && i === samples ? i : i - 1);
+          const end = present && i === samples ? i : i - 1;
+          if (end - start >= 1) runs.push({ start, end });
           start = null;
         }
       }
+
+      const path = [];
+      for (let runIndex = 0; runIndex < runs.length; runIndex++) {
+        const run = runs[runIndex];
+        for (let i = run.start; i <= run.end; i++) path.push(topPoints[i]);
+        const next = runs[runIndex + 1];
+        if (!next) continue;
+
+        const gap = next.start - run.end - 1;
+        if (hasThickness && gap >= 3) {
+          const bottomDepth = bounds.min[depthAxis];
+          const bottomPoint = (index) => {
+            const moving = vertical
+              ? bounds.min[vAxis] + index * vSpan / samples
+              : bounds.min[uAxis] + index * uSpan / samples;
+            const u = vertical ? fixed : moving;
+            const v = vertical ? moving : fixed;
+            const depthRatio = (bottomDepth - bounds.min[depthAxis]) / depthSpan;
+            return [
+              mapU(u) - (vertical ? depthRatio * reliefPixels : 0),
+              mapV(v) - (vertical ? 0 : depthRatio * reliefPixels)
+            ];
+          };
+          path.push(bottomPoint(run.end));
+          for (let i = run.end + 1; i <= next.start; i++) path.push(bottomPoint(i));
+          path.push(topPoints[next.start]);
+        } else {
+          path.push(topPoints[next.start]);
+        }
+      }
+      addPath(path, color, layer);
     }
   };
 

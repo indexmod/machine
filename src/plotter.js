@@ -31,7 +31,7 @@ export class Plotter {
 
   clear() {
     const c = this.ctx;
-    c.fillStyle = '#000';
+    c.fillStyle = '#fff';
     c.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this.onProgress(0, this.lines.length);
     this.onStatus('Ready');
