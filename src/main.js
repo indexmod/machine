@@ -1,50 +1,102 @@
 import { Plotter } from './plotter.js';
-const $ = id => document.getElementById(id);
-const canvas = $('plot');
-const startButton = $('start');
-const pauseButton = $('pause');
-let completed = false;
-const plotter = new Plotter(canvas, (n, total) => {
-  const pct = Math.round(n / total * 100);
-  $('bar').style.width = pct + '%';
-  $('percent').textContent = pct + '%';
-}, message => {
-  $('status').textContent = message.toUpperCase();
-  if (message === 'Relief revealed') {
-    completed = true;
-    startButton.textContent = 'Запустить снова';
-    pauseButton.disabled = true;
+import { buildProceduralLines } from './model.js';
+import { buildLinesFromSTL, discoverSTLModels, loadSTLModel } from './stl.js';
+
+const canvas = document.getElementById('plot');
+const rotationKey = 'machine.stl.rotation';
+
+function sizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));
+  canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
+}
+
+sizeCanvas();
+const plotter = new Plotter(canvas);
+const state = {
+  models: [],
+  currentIndex: 0,
+  started: false,
+  cache: new Map(),
+  activeTriangles: null
+};
+
+function storedIndex() {
+  try {
+    const value = Number.parseInt(localStorage.getItem(rotationKey), 10);
+    return Number.isInteger(value) ? value : null;
+  } catch {
+    return null;
   }
+}
+
+function rememberIndex() {
+  try {
+    localStorage.setItem(rotationKey, String(state.currentIndex));
+  } catch {
+    // Storage may be unavailable in private browsing; rotation still works for clicks.
+  }
+}
+
+async function selectInitialModel() {
+  state.models = await discoverSTLModels();
+  if (!state.models.length) {
+    plotter.setLines(buildProceduralLines(canvas));
+    return;
+  }
+  const previous = storedIndex();
+  state.currentIndex = previous === null ? 0 : (previous + 1) % state.models.length;
+  await activateCurrentModel();
+}
+
+async function activateCurrentModel() {
+  if (!state.models.length) {
+    state.activeTriangles = null;
+    plotter.setLines(buildProceduralLines(canvas));
+    return;
+  }
+  const model = state.models[state.currentIndex];
+  let triangles = state.cache.get(model.url);
+  if (!triangles) {
+    triangles = await loadSTLModel(model);
+    state.cache.set(model.url, triangles);
+  }
+  state.activeTriangles = triangles;
+  plotter.setLines(buildLinesFromSTL(triangles, canvas));
+}
+
+const ready = selectInitialModel().catch((error) => {
+  console.warn('STL model initialization failed', error);
+  state.models = [];
+  state.activeTriangles = null;
+  plotter.setLines(buildProceduralLines(canvas));
 });
-startButton.addEventListener('click', () => {
-  if (completed) {
+
+let clickQueue = Promise.resolve();
+window.addEventListener('click', () => {
+  plotter.unlockAudio();
+  const advance = state.started;
+  state.started = true;
+  clickQueue = clickQueue.then(async () => {
+    await ready;
+    if (advance && state.models.length > 1) {
+      state.currentIndex = (state.currentIndex + 1) % state.models.length;
+    }
+    await activateCurrentModel();
+    rememberIndex();
     plotter.reset();
-    completed = false;
-    startButton.textContent = 'Начать';
-  }
-  plotter.start();
-  startButton.textContent = 'Продолжить';
-  pauseButton.disabled = false;
+    plotter.start();
+  }).catch((error) => console.warn('Drawing restart failed', error));
 });
-pauseButton.addEventListener('click', () => {
-  plotter.pause();
-  startButton.textContent = 'Продолжить';
-  pauseButton.disabled = true;
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => {
+    const wasRunning = plotter.running;
+    sizeCanvas();
+    if (state.activeTriangles) plotter.setLines(buildLinesFromSTL(state.activeTriangles, canvas));
+    else plotter.setLines(buildProceduralLines(canvas));
+    if (wasRunning) plotter.start();
+  }, 100);
 });
-$('reset').addEventListener('click', () => {
-  plotter.reset();
-  completed = false;
-  pauseButton.disabled = true;
-  startButton.textContent = 'Начать';
-});
-$('duration').addEventListener('input', e => {
-  const value = Number(e.target.value);
-  plotter.setDuration(value);
-  $('durationOut').textContent = (value / 1000).toFixed(1) + ' с';
-});
-$('gap').addEventListener('input', e => {
-  const value = Number(e.target.value);
-  plotter.setGap(value);
-  $('gapOut').textContent = (value / 1000).toFixed(2) + ' с';
-});
-$('sound').addEventListener('change', e => plotter.setSound(e.target.checked));

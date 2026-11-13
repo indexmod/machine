@@ -1,15 +1,13 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>The Machine — Invisible Plotter</title><link rel="stylesheet" href="./style.css"></head>
-<body><main class="app">
-<header><div><div class="eyebrow">THE MACHINE / GENERATIVE RELIEF SYSTEM</div><h1>Машина</h1><p>Двухосевое проявление скрытой трёхмерной формы</p></div><div class="edition">STUDY 001<br>BLUE → RED</div></header>
-<section class="stage"><canvas id="plot" width="1000" height="1000" aria-label="Анимация рисования рельефа"></canvas><div class="stage-label">PROCEDURAL HEIGHT FIELD · NO IMAGE TEXTURE</div></section>
-<section class="controls">
-<div class="buttons"><button class="primary" id="start">Начать</button><button id="pause" disabled>Пауза</button><button id="reset">Сначала</button></div>
-<div class="sliders">
-<label>Время линии <output id="durationOut">2.4 с</output><input id="duration" type="range" min="1000" max="6000" step="200" value="2400"></label>
-<label>Пауза между линиями <output id="gapOut">0.42 с</output><input id="gap" type="range" min="100" max="1500" step="50" value="420"></label>
-<label>Звук плоттера <input id="sound" type="checkbox" checked></label>
-</div><div class="progress"><div id="bar"></div></div><div class="meta"><span id="status">ГОТОВ</span><span id="percent">0%</span><span>66 + 66 ЛИНИЙ</span></div>
-</section><footer>Горизонтальный синий слой наносится первым. После его завершения начинается вертикальный красный слой. Геометрия каждого штриха рассчитывается по самостоятельной высотной модели панели.</footer>
-</main><script type="module" src="./src/main.js"></script></body></html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Machine</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <canvas id="plot" aria-label="Анимация рисования модели"></canvas>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

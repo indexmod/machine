@@ -1,4 +1,4 @@
-import { MODEL, heightAt, gradientAt } from './model.js';
+import { buildProceduralLines } from './model.js';
 
 export class Plotter {
   constructor(canvas, onProgress = () => {}, onStatus = () => {}) {
@@ -6,11 +6,11 @@ export class Plotter {
     this.ctx = canvas.getContext('2d');
     this.onProgress = onProgress;
     this.onStatus = onStatus;
-    this.lines = [];
+    this.lines = buildProceduralLines(canvas);
     this.index = 0;
     this.running = false;
     this.paused = false;
-    this.lineDuration = 2400;
+    this.lineDuration = 3600;
     this.gapDuration = 420;
     this.sound = true;
     this.phase = 'line';
@@ -19,44 +19,20 @@ export class Plotter {
     this.lastFrame = 0;
     this.raf = 0;
     this.audio = null;
-    this._build();
+    this.renderScale = Math.min(canvas.width, canvas.height) / 1000;
     this.clear();
   }
 
-  _build() {
-    const N = this.canvas.width;
-    const margin = 0.075 * N;
-    const count = 66;
-    // Pass 1: 66 horizontal blue contours.
-    for (let j = 0; j < count; j++) {
-      const y = margin + j * (N - 2 * margin) / (count - 1);
-      const points = [];
-      for (let i = 0; i <= 300; i++) {
-        const x = margin + i * (N - 2 * margin) / 300;
-        const xn = x / N, yn = y / N;
-        const z = heightAt(xn, yn), g = gradientAt(xn, yn);
-        points.push([x, y - z * 112 - g[1] * 0.65]);
-      }
-      this.lines.push({ points, color: '#2468d8', layer: 0 });
-    }
-    // Pass 2: 66 vertical red contours, only after the blue pass is complete.
-    for (let j = 0; j < count; j++) {
-      const x = margin + j * (N - 2 * margin) / (count - 1);
-      const points = [];
-      for (let i = 0; i <= 300; i++) {
-        const y = margin + i * (N - 2 * margin) / 300;
-        const xn = x / N, yn = y / N;
-        const z = heightAt(xn, yn), g = gradientAt(xn, yn);
-        points.push([x - z * 112 - g[0] * 0.65, y]);
-      }
-      this.lines.push({ points, color: '#df4038', layer: 1 });
-    }
+  setLines(lines) {
+    this.lines = Array.isArray(lines) && lines.length ? lines : buildProceduralLines(this.canvas);
+    this.renderScale = Math.min(this.canvas.width, this.canvas.height) / 1000;
+    this.reset();
   }
 
   clear() {
-    const c = this.ctx, n = this.canvas.width;
-    c.fillStyle = '#f0f0ed';
-    c.fillRect(0, 0, n, n);
+    const c = this.ctx;
+    c.fillStyle = '#fff';
+    c.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this.onProgress(0, this.lines.length);
     this.onStatus('Ready');
   }
@@ -80,8 +56,14 @@ export class Plotter {
     this.motor.start();
   }
 
+  unlockAudio() {
+    this._initAudio();
+    if (this.audio?.state === 'suspended') this.audio.resume();
+  }
+
   _motor(on, layer = 0) {
     if (!this.sound) return;
+    if (!this.audio && !on) return;
     this._initAudio();
     if (!this.audio) return;
     if (this.audio.state === 'suspended') this.audio.resume();
@@ -103,20 +85,15 @@ export class Plotter {
     c.beginPath();
     c.moveTo(points[start][0], points[start][1]);
     for (let i = start + 1; i <= end; i++) c.lineTo(points[i][0], points[i][1]);
-    c.strokeStyle = 'rgba(25,28,34,.14)';
-    c.lineWidth = 2.2;
-    c.stroke();
-    c.beginPath();
-    c.moveTo(points[start][0], points[start][1]);
-    for (let i = start + 1; i <= end; i++) c.lineTo(points[i][0], points[i][1]);
-    c.strokeStyle = line.color;
-    c.lineWidth = 1.45;
+    c.strokeStyle = line.color || '#000';
+    c.lineWidth = 2.8 * this.renderScale;
     c.stroke();
     c.restore();
   }
 
   start() {
     if (this.running) return;
+    if (!this.lines.length) return;
     if (this.index >= this.lines.length) this.reset();
     this._initAudio();
     if (this.audio?.state === 'suspended') this.audio.resume();
@@ -125,7 +102,7 @@ export class Plotter {
     this.lastFrame = 0;
     const line = this.lines[this.index];
     this._motor(this.phase === 'line', line?.layer ?? 0);
-    this.onStatus(this.phase === 'gap' ? 'Moving to next line' : (line?.layer === 0 ? 'Blue horizontal pass' : 'Red vertical pass'));
+    this.onStatus(this.phase === 'gap' ? 'Moving to next line' : 'Drawing');
     this.raf = requestAnimationFrame((t) => this._frame(t));
   }
 
@@ -147,16 +124,10 @@ export class Plotter {
     this.lineElapsed = 0;
     this.gapElapsed = 0;
     this.lastFrame = 0;
+    this._drawnPoint = 0;
     this._motor(false);
     this.clear();
   }
-
-  setSound(value) {
-    this.sound = value;
-    if (!value) this._motor(false);
-  }
-  setDuration(ms) { this.lineDuration = ms; }
-  setGap(ms) { this.gapDuration = ms; }
 
   _frame(timestamp) {
     if (!this.running) return;
@@ -170,7 +141,7 @@ export class Plotter {
       const fraction = this.lineElapsed / this.lineDuration;
       const lastPoint = line.points.length - 1;
       const target = Math.min(lastPoint, Math.floor(fraction * lastPoint));
-      this._drawSegment(line, this._drawnPoint ?? 0, target);
+      this._drawSegment(line, this._drawnPoint, target);
       this._drawnPoint = target;
       this.onProgress(this.index + fraction, this.lines.length);
       if (fraction >= 1) {
@@ -192,8 +163,8 @@ export class Plotter {
       if (this.gapElapsed >= this.gapDuration) {
         this.phase = 'line';
         const next = this.lines[this.index];
-        this._motor(true, next.layer);
-        this.onStatus(next.layer === 0 ? 'Blue horizontal pass' : 'Red vertical pass');
+        this._motor(true, next?.layer ?? 0);
+        this.onStatus('Drawing');
       }
     }
     this.raf = requestAnimationFrame((t) => this._frame(t));

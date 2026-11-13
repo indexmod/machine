@@ -49,3 +49,43 @@ export function gradientAt(x,y) {
   return [(heightAt(x+e,y)-heightAt(x-e,y))/(2*e),
           (heightAt(x,y+e)-heightAt(x,y-e))/(2*e)];
 }
+
+export function buildProceduralLines(canvas) {
+  const width = canvas.width;
+  const height = canvas.height;
+  const side = Math.min(width, height);
+  const offsetX = (width - side) / 2;
+  const offsetY = (height - side) / 2;
+  const margin = 0.075 * side;
+  const count = 66;
+  const lines = [];
+  const project = (value) => value / side;
+
+  // Pass 1: vertical blue strokes.
+  for (let j = 0; j < count; j++) {
+    const x = offsetX + margin + j * (side - 2 * margin) / (count - 1);
+    const points = [];
+    for (let i = 0; i <= 300; i++) {
+      const y = offsetY + margin + i * (side - 2 * margin) / 300;
+      const xn = project(x - offsetX), yn = project(y - offsetY);
+      const z = heightAt(xn, yn), g = gradientAt(xn, yn);
+      points.push([x - z * side * 0.112 - g[0] * side * 0.00065, y]);
+    }
+    lines.push({ points, color: '#2468d8', layer: 0 });
+  }
+
+  // Pass 2: horizontal red strokes.
+  for (let j = 0; j < count; j++) {
+    const y = offsetY + margin + j * (side - 2 * margin) / (count - 1);
+    const points = [];
+    for (let i = 0; i <= 300; i++) {
+      const x = offsetX + margin + i * (side - 2 * margin) / 300;
+      const xn = project(x - offsetX), yn = project(y - offsetY);
+      const z = heightAt(xn, yn), g = gradientAt(xn, yn);
+      points.push([x, y - z * side * 0.112 - g[1] * side * 0.00065]);
+    }
+    lines.push({ points, color: '#df4038', layer: 1 });
+  }
+
+  return lines;
+}
