@@ -69,19 +69,19 @@ export class Plotter {
     if (this.audio?.state === 'suspended') this.audio.resume();
   }
 
-  _motor(on, layer = 0) {
+  _motor(on, layer = 0, travel = false) {
     if (!this.sound) return;
     if (!this.audio && !on) return;
     this._initAudio();
     if (!this.audio) return;
     if (this.audio.state === 'suspended') this.audio.resume();
     const t = this.audio.currentTime;
-    this.motor.frequency.setTargetAtTime(layer === 0 ? 142 : 176, t, 0.035);
+    this.motor.frequency.setTargetAtTime(travel ? 112 : (layer === 0 ? 142 : 176), t, 0.035);
     this.pulse.frequency.setTargetAtTime(layer === 0 ? 7.5 : 8.5, t, 0.035);
     this.gain.gain.cancelScheduledValues(t);
-    this.gain.gain.setTargetAtTime(on ? 0.015 : 0.0001, t, on ? 0.025 : 0.055);
+    this.gain.gain.setTargetAtTime(on ? (travel ? 0.009 : 0.015) : 0.0001, t, on ? 0.025 : 0.055);
     this.pulseDepth.gain.cancelScheduledValues(t);
-    this.pulseDepth.gain.setTargetAtTime(on ? 0.012 : 0, t, on ? 0.025 : 0.055);
+    this.pulseDepth.gain.setTargetAtTime(on && !travel ? 0.012 : 0, t, on ? 0.025 : 0.055);
   }
 
   _drawSegment(line, fromIndex, toIndex) {
@@ -160,13 +160,15 @@ export class Plotter {
         this.phase = 'gap';
         this.gapElapsed = 0;
         this._drawnPoint = 0;
-        this._motor(false);
         this.onProgress(this.index, this.lines.length);
         if (this.index >= this.lines.length) {
+          this._motor(false);
           this.running = false;
           this.onStatus('Relief revealed');
           return;
         }
+        const next = this.lines[this.index];
+        this._motor(true, next?.layer ?? 0, true);
         this.onStatus('Moving to next line');
       }
     } else {
@@ -174,7 +176,7 @@ export class Plotter {
       if (this.gapElapsed >= this.gapDuration) {
         this.phase = 'line';
         const next = this.lines[this.index];
-        this._motor(true, next?.layer ?? 0);
+        this._motor(true, next?.layer ?? 0, false);
         this.onStatus('Drawing');
       }
     }
