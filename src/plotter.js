@@ -10,7 +10,7 @@ export class Plotter {
     this.index = 0;
     this.running = false;
     this.paused = false;
-    this.lineDuration = 3600;
+    this.lineDuration = 1500;
     this.lineSpeed = 0;
     this.lineLengths = [];
     this.gapDuration = 420;
@@ -19,8 +19,13 @@ export class Plotter {
     this.lineElapsed = 0;
     this.gapElapsed = 0;
     this.lastFrame = 0;
+    this._drawnDistance = 0;
     this.raf = 0;
     this.audio = null;
+    this.cursorCanvas = null;
+    this.cursorCtx = null;
+    this.transitionStart = null;
+    this.transitionEnd = null;
     this.renderScale = Math.min(canvas.width, canvas.height) / 1000;
     this._prepareLineTiming();
     this.clear();
@@ -31,6 +36,33 @@ export class Plotter {
     this.renderScale = Math.min(this.canvas.width, this.canvas.height) / 1000;
     this._prepareLineTiming();
     this.reset();
+  }
+
+  setCursorCanvas(canvas) {
+    this.cursorCanvas = canvas;
+    this.cursorCtx = canvas?.getContext('2d') || null;
+    this._clearCursor();
+  }
+
+  _clearCursor() {
+    if (!this.cursorCtx || !this.cursorCanvas) return;
+    this.cursorCtx.clearRect(0, 0, this.cursorCanvas.width, this.cursorCanvas.height);
+  }
+
+  _setCursorPoint(point) {
+    if (!this.cursorCtx || !this.cursorCanvas || !point) return;
+    const c = this.cursorCtx;
+    c.clearRect(0, 0, this.cursorCanvas.width, this.cursorCanvas.height);
+    c.save();
+    c.strokeStyle = '#000';
+    c.lineWidth = Math.max(1, 1.15 * this.renderScale);
+    c.beginPath();
+    c.moveTo(-this.cursorCanvas.width, point[1]);
+    c.lineTo(this.cursorCanvas.width * 2, point[1]);
+    c.moveTo(point[0], -this.cursorCanvas.height);
+    c.lineTo(point[0], this.cursorCanvas.height * 2);
+    c.stroke();
+    c.restore();
   }
 
   _prepareLineTiming() {
@@ -53,7 +85,7 @@ export class Plotter {
 
   _durationForLine(index) {
     const length = this.lineLengths[index] || 1;
-    return Math.max(1800, Math.min(7200, Math.round(length / this.lineSpeed)));
+    return Math.max(700, Math.min(2000, Math.round(length / this.lineSpeed)));
   }
 
   _pointAtDistance(line, distance) {
@@ -78,6 +110,7 @@ export class Plotter {
     const c = this.ctx;
     c.fillStyle = '#fff';
     c.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this._clearCursor();
     this.onProgress(0, this.lines.length);
     this.onStatus('Ready');
   }
@@ -146,7 +179,7 @@ export class Plotter {
     }
     c.lineTo(endPoint[0], endPoint[1]);
     c.strokeStyle = line.color || '#000';
-    c.lineWidth = 2.8 * this.renderScale;
+    c.lineWidth = 3.4 * this.renderScale;
     c.stroke();
     c.restore();
   }
@@ -161,6 +194,8 @@ export class Plotter {
     this.paused = false;
     this.lastFrame = 0;
     const line = this.lines[this.index];
+    if (this.phase === 'line') this._setCursorPoint(this._pointAtDistance(line, this._drawnDistance));
+    else if (this.transitionStart) this._setCursorPoint(this.transitionStart);
     this._motor(this.phase === 'line', line?.layer ?? 0);
     this.onStatus(this.phase === 'gap' ? 'Moving to next line' : 'Drawing');
     this.raf = requestAnimationFrame((t) => this._frame(t));
@@ -185,6 +220,8 @@ export class Plotter {
     this.gapElapsed = 0;
     this.lastFrame = 0;
     this._drawnDistance = 0;
+    this.transitionStart = null;
+    this.transitionEnd = null;
     this._motor(false);
     this.clear();
   }
@@ -203,6 +240,7 @@ export class Plotter {
       const targetDistance = fraction * line.length;
       this._drawSegment(line, this._drawnDistance, targetDistance);
       this._drawnDistance = targetDistance;
+      this._setCursorPoint(this._pointAtDistance(line, targetDistance));
       this.onProgress(this.index + fraction, this.lines.length);
       if (fraction >= 1) {
         this.index++;
@@ -213,19 +251,33 @@ export class Plotter {
         this.onProgress(this.index, this.lines.length);
         if (this.index >= this.lines.length) {
           this._motor(false);
+          this._clearCursor();
           this.running = false;
           this.onStatus('Relief revealed');
           return;
         }
         const next = this.lines[this.index];
+        this.transitionStart = line.points.at(-1);
+        this.transitionEnd = next.points[0];
+        this._setCursorPoint(this.transitionStart);
         this._motor(true, next?.layer ?? 0, true);
         this.onStatus('Moving to next line');
       }
     } else {
       this.gapElapsed = Math.min(this.gapDuration, this.gapElapsed + dt);
+      const transitionFraction = this.gapElapsed / this.gapDuration;
+      if (this.transitionStart && this.transitionEnd) {
+        this._setCursorPoint([
+          this.transitionStart[0] + (this.transitionEnd[0] - this.transitionStart[0]) * transitionFraction,
+          this.transitionStart[1] + (this.transitionEnd[1] - this.transitionStart[1]) * transitionFraction
+        ]);
+      }
       if (this.gapElapsed >= this.gapDuration) {
         this.phase = 'line';
         const next = this.lines[this.index];
+        this.transitionStart = null;
+        this.transitionEnd = null;
+        this._setCursorPoint(next.points[0]);
         this._motor(true, next?.layer ?? 0, false);
         this.onStatus('Drawing');
       }

@@ -3,18 +3,22 @@ import { buildProceduralLines } from './model.js';
 import { buildLinesFromSTL, discoverSTLModels, loadSTLModel } from './stl.js';
 
 const canvas = document.getElementById('plot');
+const cursorCanvas = document.getElementById('cursor');
 const rotationKey = 'machine.stl.rotation';
 
 function sizeCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const width = document.documentElement.clientWidth || window.innerWidth || 300;
   const height = document.documentElement.clientHeight || window.innerHeight || 150;
-  canvas.width = Math.max(1, Math.round(width * dpr));
-  canvas.height = Math.max(1, Math.round(height * dpr));
+  for (const target of [canvas, cursorCanvas]) {
+    target.width = Math.max(1, Math.round(width * dpr));
+    target.height = Math.max(1, Math.round(height * dpr));
+  }
 }
 
 sizeCanvas();
 const plotter = new Plotter(canvas);
+plotter.setCursorCanvas(cursorCanvas);
 const state = {
   models: [],
   currentIndex: 0,

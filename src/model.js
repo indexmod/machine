@@ -57,7 +57,7 @@ export function buildProceduralLines(canvas) {
   const offsetX = (width - side) / 2;
   const offsetY = (height - side) / 2;
   const margin = 0.075 * side;
-  const count = 66;
+  const count = 56;
   const lines = [];
   const project = (value) => value / side;
 

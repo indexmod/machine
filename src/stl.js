@@ -264,11 +264,25 @@ export function buildLinesFromSTL(triangles, canvas) {
   const padding = side * 0.075;
   const plotSize = side - padding * 2;
   const reliefPixels = Math.min(plotSize * 0.075, side * 0.08);
-  const count = 66;
+  const depthShiftX = reliefPixels * 0.72;
+  const depthShiftY = reliefPixels * 0.72;
+  const count = 56;
   const samples = 300;
+  const scanInsetU = uSpan / (count * 2);
+  const scanInsetV = vSpan / (count * 2);
+  const scanMinU = bounds.min[uAxis] + scanInsetU;
+  const scanMaxU = bounds.max[uAxis] - scanInsetU;
+  const scanMinV = bounds.min[vAxis] + scanInsetV;
+  const scanMaxV = bounds.max[vAxis] - scanInsetV;
+  const scanSpanU = scanMaxU - scanMinU;
+  const scanSpanV = scanMaxV - scanMinV;
   const lines = [];
   const mapU = (u) => (canvas.width - side) / 2 + padding + (u - bounds.min[uAxis]) / uSpan * plotSize;
   const mapV = (v) => (canvas.height - side) / 2 + padding + (bounds.max[vAxis] - v) / vSpan * plotSize;
+  const project = (u, v, depth) => {
+    const depthRatio = (depth - bounds.min[depthAxis]) / depthSpan;
+    return [mapU(u) - depthRatio * depthShiftX, mapV(v) - depthRatio * depthShiftY];
+  };
   const addPath = (path, color, layer) => {
     if (path.length > 1) lines.push({ points: path, color, layer });
   };
@@ -278,20 +292,17 @@ export function buildLinesFromSTL(triangles, canvas) {
     const layer = vertical ? 0 : 1;
     for (let j = 0; j < count; j++) {
       const fixed = vertical
-        ? bounds.min[uAxis] + j * uSpan / (count - 1)
-        : bounds.min[vAxis] + j * vSpan / (count - 1);
+        ? scanMinU + j * scanSpanU / (count - 1)
+        : scanMinV + j * scanSpanV / (count - 1);
       const topPoints = [];
       for (let i = 0; i <= samples; i++) {
         const moving = vertical
-          ? bounds.min[vAxis] + i * vSpan / samples
-          : bounds.min[uAxis] + i * uSpan / samples;
+          ? scanMinV + i * scanSpanV / samples
+          : scanMinU + i * scanSpanU / samples;
         const u = vertical ? fixed : moving;
         const v = vertical ? moving : fixed;
         const topDepth = sampleTop(u, v);
-        topPoints.push(topDepth === null ? null : [
-          mapU(u) - (vertical ? ((topDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels : 0),
-          mapV(v) - (vertical ? 0 : ((topDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels)
-        ]);
+        topPoints.push(topDepth === null ? null : project(u, v, topDepth));
       }
 
       const runs = [];
@@ -318,15 +329,11 @@ export function buildLinesFromSTL(triangles, canvas) {
           const bottomDepth = bounds.min[depthAxis];
           const bottomPoint = (index) => {
             const moving = vertical
-              ? bounds.min[vAxis] + index * vSpan / samples
-              : bounds.min[uAxis] + index * uSpan / samples;
+              ? scanMinV + index * scanSpanV / samples
+              : scanMinU + index * scanSpanU / samples;
             const u = vertical ? fixed : moving;
             const v = vertical ? moving : fixed;
-            const depthRatio = (bottomDepth - bounds.min[depthAxis]) / depthSpan;
-            return [
-              mapU(u) - (vertical ? depthRatio * reliefPixels : 0),
-              mapV(v) - (vertical ? 0 : depthRatio * reliefPixels)
-            ];
+            return project(u, v, bottomDepth);
           };
           path.push(bottomPoint(run.end));
           for (let i = run.end + 1; i <= next.start; i++) path.push(bottomPoint(i));
