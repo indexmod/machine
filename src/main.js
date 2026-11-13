@@ -7,8 +7,10 @@ const rotationKey = 'machine.stl.rotation';
 
 function sizeCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));
-  canvas.height = Math.max(1, Math.round(window.innerHeight * dpr));
+  const width = document.documentElement.clientWidth || window.innerWidth || 300;
+  const height = document.documentElement.clientHeight || window.innerHeight || 150;
+  canvas.width = Math.max(1, Math.round(width * dpr));
+  canvas.height = Math.max(1, Math.round(height * dpr));
 }
 
 sizeCanvas();

@@ -132,6 +132,34 @@ function boundsOf(triangles) {
   return { min, max, spans: max.map((value, axis) => value - min[axis]) };
 }
 
+function triangleNormal(triangle) {
+  const [a, b, c] = triangle;
+  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  return [
+    ab[1] * ac[2] - ab[2] * ac[1],
+    ab[2] * ac[0] - ab[0] * ac[2],
+    ab[0] * ac[1] - ab[1] * ac[0]
+  ];
+}
+
+function splitSurfaceTriangles(triangles, depthAxis) {
+  const positive = [];
+  const negative = [];
+  for (const triangle of triangles) {
+    const normal = triangleNormal(triangle);
+    const length = Math.hypot(...normal);
+    if (!length || Math.abs(normal[depthAxis]) / length < 0.75) continue;
+    (normal[depthAxis] >= 0 ? positive : negative).push(triangle);
+  }
+  const averageDepth = (group) => group.length
+    ? group.reduce((sum, triangle) => sum + triangle.reduce((inner, vertex) => inner + vertex[depthAxis], 0) / 3, 0) / group.length
+    : -Infinity;
+  return averageDepth(positive) >= averageDepth(negative)
+    ? { top: positive, bottom: negative }
+    : { top: negative, bottom: positive };
+}
+
 function buildSurfaceSampler(triangles, uAxis, vAxis, bounds) {
   const uSpan = Math.max(bounds.spans[uAxis], Number.EPSILON);
   const vSpan = Math.max(bounds.spans[vAxis], Number.EPSILON);
@@ -229,7 +257,10 @@ export function buildLinesFromSTL(triangles, canvas) {
   const uSpan = Math.max(bounds.spans[uAxis], Number.EPSILON);
   const vSpan = Math.max(bounds.spans[vAxis], Number.EPSILON);
   const depthSpan = Math.max(bounds.spans[depthAxis], Number.EPSILON);
-  const sampleSurface = buildSurfaceSampler(triangles, uAxis, vAxis, bounds);
+  const surfaces = splitSurfaceTriangles(triangles, depthAxis);
+  const hasThickness = surfaces.top.length >= triangles.length * 0.05 && surfaces.bottom.length >= triangles.length * 0.05;
+  const sampleTop = buildSurfaceSampler(hasThickness ? surfaces.top : triangles, uAxis, vAxis, bounds);
+  const sampleBottom = hasThickness ? buildSurfaceSampler(surfaces.bottom, uAxis, vAxis, bounds) : null;
   const side = Math.min(canvas.width, canvas.height);
   const padding = side * 0.075;
   const plotSize = side - padding * 2;
@@ -250,25 +281,48 @@ export function buildLinesFromSTL(triangles, canvas) {
       const fixed = vertical
         ? bounds.min[uAxis] + j * uSpan / (count - 1)
         : bounds.min[vAxis] + j * vSpan / (count - 1);
-      let path = [];
+      const topPoints = [];
+      const bottomPoints = [];
       for (let i = 0; i <= samples; i++) {
         const moving = vertical
           ? bounds.min[vAxis] + i * vSpan / samples
           : bounds.min[uAxis] + i * uSpan / samples;
         const u = vertical ? fixed : moving;
         const v = vertical ? moving : fixed;
-        const depth = sampleSurface(u, v);
-        if (depth === null) {
-          addPath(path, color, layer);
-          path = [];
-          continue;
-        }
-        const depthRatio = (depth - bounds.min[depthAxis]) / depthSpan;
-        const x = mapU(u) - (vertical ? depthRatio * reliefPixels : 0);
-        const y = mapV(v) - (vertical ? 0 : depthRatio * reliefPixels);
-        path.push([x, y]);
+        const topDepth = sampleTop(u, v);
+        const bottomDepth = sampleBottom ? sampleBottom(u, v) : null;
+        topPoints.push(topDepth === null ? null : [
+          mapU(u) - (vertical ? ((topDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels : 0),
+          mapV(v) - (vertical ? 0 : ((topDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels)
+        ]);
+        bottomPoints.push(bottomDepth === null ? null : [
+          mapU(u) - (vertical ? ((bottomDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels : 0),
+          mapV(v) - (vertical ? 0 : ((bottomDepth - bounds.min[depthAxis]) / depthSpan) * reliefPixels)
+        ]);
       }
-      addPath(path, color, layer);
+
+      let start = null;
+      const flush = (end) => {
+        if (start === null || end - start < 1) return;
+        if (!sampleBottom) {
+          addPath(topPoints.slice(start, end + 1).filter(Boolean), color, layer);
+          return;
+        }
+        const path = topPoints.slice(start, end + 1);
+        path.push(bottomPoints[end]);
+        for (let i = end - 1; i >= start; i--) path.push(bottomPoints[i]);
+        path.push(topPoints[start]);
+        addPath(path, color, layer);
+      };
+
+      for (let i = 0; i <= samples; i++) {
+        const present = topPoints[i] && (!sampleBottom || bottomPoints[i]);
+        if (present && start === null) start = i;
+        if ((!present || i === samples) && start !== null) {
+          flush(present && i === samples ? i : i - 1);
+          start = null;
+        }
+      }
     }
   };
 

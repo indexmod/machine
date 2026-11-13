@@ -31,7 +31,7 @@ export class Plotter {
 
   clear() {
     const c = this.ctx;
-    c.fillStyle = '#fff';
+    c.fillStyle = '#000';
     c.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this.onProgress(0, this.lines.length);
     this.onStatus('Ready');
@@ -45,15 +45,23 @@ export class Plotter {
     this.motor = this.audio.createOscillator();
     this.filter = this.audio.createBiquadFilter();
     this.gain = this.audio.createGain();
+    this.pulse = this.audio.createOscillator();
+    this.pulseDepth = this.audio.createGain();
     this.motor.type = 'sawtooth';
     this.motor.frequency.value = 142;
     this.filter.type = 'lowpass';
     this.filter.frequency.value = 520;
     this.gain.gain.value = 0.0001;
+    this.pulse.type = 'sine';
+    this.pulse.frequency.value = 8;
+    this.pulseDepth.gain.value = 0;
     this.motor.connect(this.filter);
     this.filter.connect(this.gain);
     this.gain.connect(this.audio.destination);
+    this.pulse.connect(this.pulseDepth);
+    this.pulseDepth.connect(this.gain.gain);
     this.motor.start();
+    this.pulse.start();
   }
 
   unlockAudio() {
@@ -69,8 +77,11 @@ export class Plotter {
     if (this.audio.state === 'suspended') this.audio.resume();
     const t = this.audio.currentTime;
     this.motor.frequency.setTargetAtTime(layer === 0 ? 142 : 176, t, 0.035);
+    this.pulse.frequency.setTargetAtTime(layer === 0 ? 7.5 : 8.5, t, 0.035);
     this.gain.gain.cancelScheduledValues(t);
-    this.gain.gain.setTargetAtTime(on ? 0.026 : 0.0001, t, on ? 0.025 : 0.055);
+    this.gain.gain.setTargetAtTime(on ? 0.015 : 0.0001, t, on ? 0.025 : 0.055);
+    this.pulseDepth.gain.cancelScheduledValues(t);
+    this.pulseDepth.gain.setTargetAtTime(on ? 0.012 : 0, t, on ? 0.025 : 0.055);
   }
 
   _drawSegment(line, fromIndex, toIndex) {
